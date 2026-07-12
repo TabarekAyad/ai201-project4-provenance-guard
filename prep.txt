@@ -1,0 +1,403 @@
+PROVENANCE GUARD — MILESTONE 1 PREP
+=====================================
+All four Milestone 1 questions answered, plus API surface and architecture diagram.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION 1: ARCHITECTURE NARRATIVE
+Path of a single piece of text from submission to label
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Rate Limiter (Flask-Limiter, on the route itself)
+   The request hits the submission endpoint first, but before any logic runs,
+   Flask-Limiter checks the requester's IP against the configured limits. If
+   they've exceeded the allowed rate, the request is rejected with a 429 Too
+   Many Requests and never proceeds further. This is a pure gate — no content
+   is touched.
+
+2. Submission Endpoint (POST /submit)
+   The Flask route receives a JSON body containing at minimum text (the content
+   to analyze) and creator_id (who submitted it). It validates the payload,
+   generates a unique content_id (a UUID) for this submission, and orchestrates
+   the rest of the pipeline. This component owns the overall flow — it calls
+   the signals, hands their outputs to the scorer, generates the label, writes
+   the log, and constructs the final response.
+
+3. Signal 1 — LLM Classifier (Groq, llama-3.3-70b-versatile)
+   The text is sent to the Groq API with a structured prompt asking the model
+   to assess whether the text reads as human- or AI-generated. The model returns
+   a semantic and stylistic judgment — it's looking at things like coherence,
+   hedging language, and characteristic AI phrasing patterns. The output is a
+   score (0–1), where higher means more likely AI-generated.
+
+4. Signal 2 — Stylometric Heuristics (pure Python)
+   Independently, the same raw text is analyzed for measurable statistical
+   properties: sentence length variance, type-token ratio (vocabulary diversity),
+   punctuation density. AI-generated text tends to be more uniform; human writing
+   is more variable. This signal produces its own 0–1 score with no external
+   API call.
+
+5. Confidence Scorer
+   Both signal scores are passed to a combining function that weights and merges
+   them into a single confidence score (0–1). The weighting reflects how much we
+   trust each signal (65% LLM, 35% stylometric), and the thresholds define three
+   zones: high-confidence AI (≥ 0.75), uncertain (0.36–0.74), and high-confidence
+   human (≤ 0.35). The scorer outputs the combined score and a categorical
+   attribution result (likely_ai, uncertain, likely_human).
+
+6. Transparency Label Generator
+   The combined confidence score and attribution result are handed to a label
+   function that maps them to plain-language text — the exact string a user would
+   see on the platform. Three variants exist, one per category. The label is
+   designed for a non-technical reader; it communicates both the verdict and the
+   system's certainty level.
+
+7. Audit Logger (SQLite)
+   Before returning a response, the endpoint writes a structured log entry
+   capturing: timestamp, content_id, creator_id, attribution result, combined
+   confidence score, individual signal scores, and initial status ("classified").
+   This entry is permanent and becomes the record of this classification decision.
+
+8. Response to Caller
+   The submission endpoint returns a JSON object containing: content_id,
+   attribution, confidence, and label (the exact transparency label text).
+   The content_id is critical — it's the handle a creator uses if they want
+   to appeal.
+
+Full path:
+Rate Limiter → Submission Endpoint → LLM Signal → Stylometric Signal
+→ Confidence Scorer → Label Generator → Audit Logger → JSON Response
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION 2: DETECTION SIGNALS
+What each measures, why it differs, and what it misses
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SIGNAL 1 — LLM Classifier (Groq / llama-3.3-70b-versatile)
+
+  What it measures:
+  Semantic and stylistic coherence holistically — does the text "feel" like AI
+  output? The model assesses characteristic hedging phrases ("it is important to
+  note that"), over-structured argumentation, unnaturally smooth transitions, and
+  the absence of genuine personal voice or idiosyncratic thought.
+
+  Why it differs between human and AI writing:
+  AI models are trained to be maximally helpful and coherent, which produces a
+  recognizable register: balanced, thorough, diplomatically worded, and
+  structurally tidy. Human writing reflects actual mental state — it meanders,
+  has opinions without caveats, makes abrupt topic shifts, uses colloquialisms
+  unevenly, and carries the marks of a specific person in a specific moment.
+
+  Blind spots:
+  - Edited AI output: a human who lightly edits AI-generated text — adding a
+    personal anecdote, breaking a sentence awkwardly — can fool semantic judgment.
+  - Highly polished human writing: professional editors, academics, and technical
+    writers produce prose that is structurally smooth and impersonal by design.
+  - Non-native English speakers: formal, careful English from a second-language
+    writer can share surface features with AI output.
+  - Prompt sensitivity: the classifier's verdict depends on how the detection
+    prompt is worded. A poorly framed prompt produces inconsistent scores.
+
+
+SIGNAL 2 — Stylometric Heuristics (pure Python)
+
+  What it measures:
+  Three statistical properties of the text's surface structure:
+  - Sentence length variance: std deviation of word counts across sentences.
+    Low variance = uniform rhythm (AI-like).
+  - Type-token ratio (TTR): unique words / total words.
+    Low TTR = repetitive vocabulary (AI-like).
+  - Punctuation density: punctuation marks / total words.
+    Very low density = clean, rule-following prose (AI-like).
+
+  Why it differs between human and AI writing:
+  AI models sample from a distribution that rewards fluency and readability,
+  producing more uniform output. Sentence lengths cluster around a comfortable
+  medium. Vocabulary is broad but not wildly varied within a single piece.
+  Punctuation follows standard rules without eccentricity. Human writing shows
+  higher variance on all three axes — not because humans try to vary their style,
+  but because they write from actual thought, which is inherently irregular.
+
+  Blind spots:
+  - Short texts: TTR is unreliable under ~80 words — any short text has high
+    unique-word ratios by definition.
+  - Genre sensitivity: legal writing, academic abstracts, and technical
+    documentation are structurally uniform by convention. Heuristics will
+    misflag them.
+  - AI prompted to write casually: newer models deliberately introduce variance
+    when asked to mimic human irregularity. The signal degrades as models improve.
+  - Regional/era punctuation variation: writers from traditions with different
+    punctuation conventions may score anomalously.
+
+
+Shared blind spot:
+  Both signals measure surface properties, not provenance. A human who writes
+  in a very structured, AI-like style will be penalized by both signals
+  simultaneously. This is the core false-positive risk — addressed by the wide
+  uncertain band and the appeals workflow.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION 3: THE FALSE POSITIVE PROBLEM
+What happens when the system misclassifies a human writer's work
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The scenario:
+  A non-native English speaker submits a short personal essay. They write
+  carefully and formally — hedging their claims, using even sentence rhythm,
+  keeping vocabulary measured. Both signals fire in the wrong direction: the
+  LLM classifier reads the diplomatic register as AI-like, and the stylometrics
+  see low variance and modest TTR. Combined confidence score: 0.71 — in "likely
+  AI" territory. This person wrote every word themselves.
+
+What the confidence score does:
+  0.71 is above the uncertain threshold but not extreme. The system doesn't
+  know it's wrong — it just knows it's moderately confident. This is why
+  0.71 must not produce the same label as 0.95. A score of 0.95 means both
+  signals agreed strongly. A score of 0.71 means one signal leaned hard and
+  the other hedged. The label must reflect that difference.
+
+What the label says:
+  The false-positive asymmetry (false positives are worse than false negatives
+  on a writing platform) shapes the label design directly:
+  - The high-confidence AI label (≥ 0.85) can state a definitive verdict.
+  - The uncertain band is wide enough to catch borderline cases like 0.71.
+  - Even a "likely AI" label below the high-confidence threshold includes
+    language acknowledging uncertainty and explicitly inviting appeal.
+  - The label for this scenario: "Our system found mixed signals and cannot
+    confidently determine attribution... the creator may contest this through
+    an appeal."
+
+How the creator appeals:
+  The creator sees the label on their published content and disagrees. They
+  submit POST /appeal with their content_id and a creator_reasoning field
+  explaining the misclassification. The system:
+  1. Updates the content's status from "classified" to "under_review".
+  2. Appends the appeal to the audit log alongside the original decision —
+     including both individual signal scores and the creator's reasoning.
+  3. Returns a confirmation that the appeal was received.
+  A human reviewer sees the full picture: original scores, the label shown,
+  and the creator's explanation. Individual signal scores matter here — a
+  reviewer seeing llm_score: 0.79, stylometric_score: 0.63 knows the signals
+  partially disagreed and can weight the appeal accordingly.
+
+What this informs for the spec:
+  1. Set the uncertain band wider than feels natural (0.36–0.74, not 0.45–0.55).
+  2. Every label tier except human-written must mention appeals.
+  3. Log individual signal scores, not just the combined score — the appeal
+     workflow is only useful if reviewers can see why the system decided what
+     it decided.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION 4: API SURFACE
+Endpoints, contracts, inputs, and outputs
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────
+POST /submit
+────────────────────────────────────────
+Purpose: Accept a piece of text content for attribution analysis.
+
+Rate limited: yes (10/minute, 100/day per IP)
+
+Request body (JSON):
+  {
+    "text":       string  -- the content to analyze (required)
+    "creator_id": string  -- identifier for the submitting creator (required)
+  }
+
+Success response 200 (JSON):
+  {
+    "content_id":  string  -- UUID assigned to this submission
+    "attribution": string  -- "likely_ai" | "uncertain" | "likely_human"
+    "confidence":  float   -- combined score 0.0–1.0
+    "label":       string  -- exact transparency label text shown to users
+    "status":      string  -- "classified"
+  }
+
+Error responses:
+  400  -- missing or invalid fields
+  429  -- rate limit exceeded
+
+
+────────────────────────────────────────
+POST /appeal
+────────────────────────────────────────
+Purpose: Let a creator contest a classification decision.
+
+Rate limited: no
+
+Request body (JSON):
+  {
+    "content_id":         string  -- UUID from the original /submit response (required)
+    "creator_reasoning":  string  -- creator's explanation of the misclassification (required)
+  }
+
+Success response 200 (JSON):
+  {
+    "content_id": string  -- echoed back
+    "status":     string  -- "under_review"
+    "message":    string  -- e.g. "Your appeal has been received..."
+  }
+
+Error responses:
+  400  -- missing fields
+  404  -- content_id not found in storage
+
+
+────────────────────────────────────────
+GET /log
+────────────────────────────────────────
+Purpose: Return recent audit log entries for documentation and grading visibility.
+         Intentionally open — in a real system this would require auth.
+
+Request: no body; optional ?limit=N query param (default: all entries)
+
+Success response 200 (JSON):
+  {
+    "entries": [
+      {
+        "content_id":        string  -- UUID
+        "creator_id":        string
+        "timestamp":         string  -- ISO 8601
+        "attribution":       string  -- "likely_ai" | "uncertain" | "likely_human"
+        "confidence":        float   -- combined score
+        "llm_score":         float   -- Signal 1 output
+        "stylometric_score": float   -- Signal 2 output
+        "status":            string  -- "classified" | "under_review"
+        "appeal_reasoning":  string  -- populated if appeal filed, else null
+      },
+      ...
+    ]
+  }
+
+Error responses:
+  500  -- log unreadable
+
+
+────────────────────────────────────────
+NOTES
+────────────────────────────────────────
+- content_id is the shared key across all three endpoints. /submit creates it,
+  /appeal references it, /log surfaces it.
+- The label field in /submit is the verbatim string shown to users.
+- status has exactly two values: "classified" and "under_review".
+- Individual signal scores are logged but not returned in the /submit response —
+  they are internal evidence for reviewers, not for end users.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+QUESTION 5: ARCHITECTURE DIAGRAM
+Both flows with labeled arrows
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+FLOW 1: SUBMISSION
+──────────────────
+
+  Client
+    │
+    │  POST /submit  {text, creator_id}
+    ▼
+┌─────────────┐
+│ Rate Limiter│  ── 429 if over limit ──────────────────────────────► Client
+└──────┬──────┘
+       │  {text, creator_id}
+       ▼
+┌──────────────────┐
+│ Submission       │  generates content_id (UUID)
+│ Endpoint         │
+│ POST /submit     │
+└───┬──────────────┘
+    │                          │
+    │  raw text                │  raw text
+    ▼                          ▼
+┌──────────────┐       ┌──────────────────────┐
+│ Signal 1     │       │ Signal 2             │
+│ LLM          │       │ Stylometric          │
+│ Classifier   │       │ Heuristics           │
+│ (Groq API)   │       │ (pure Python)        │
+└──────┬───────┘       └──────────┬───────────┘
+       │  llm_score (0–1)         │  stylometric_score (0–1)
+       └──────────┬───────────────┘
+                  │  llm_score + stylometric_score
+                  ▼
+         ┌─────────────────┐
+         │ Confidence      │
+         │ Scorer          │
+         │ (65% LLM /      │
+         │  35% stylometric│
+         └────────┬────────┘
+                  │  confidence (0–1) + attribution
+                  │  ("likely_ai" | "uncertain" | "likely_human")
+                  ▼
+         ┌─────────────────┐
+         │ Label           │
+         │ Generator       │
+         └────────┬────────┘
+                  │  label text (verbatim string)
+                  ▼
+         ┌─────────────────┐
+         │ Audit Logger    │  writes: content_id, creator_id, timestamp,
+         │   (SQLite)      │          attribution, confidence,
+         └────────┬────────┘          llm_score, stylometric_score,
+                  │                   status="classified"
+                  │  confirmation
+                  ▼
+         Submission Endpoint assembles response
+                  │
+                  │  {content_id, attribution, confidence, label, status}
+                  ▼
+               Client
+
+
+FLOW 2: APPEAL
+──────────────
+
+  Client
+    │
+    │  POST /appeal  {content_id, creator_reasoning}
+    ▼
+┌──────────────────┐
+│ Appeal           │
+│ Endpoint         │
+│ POST /appeal     │
+└───┬──────────────┘
+    │  content_id
+    ▼
+┌──────────────────┐
+│ Storage Lookup   │  ── 404 if content_id not found ────────────────► Client
+│   (SQLite)       │
+└───┬──────────────┘
+    │  existing record found
+    ▼
+┌──────────────────┐
+│ Status Update    │  "classified" → "under_review"
+└───┬──────────────┘
+    │  updated record + creator_reasoning
+    ▼
+┌──────────────────┐
+│ Audit Logger     │  appends: appeal_reasoning, appeal_timestamp,
+│   (SQLite)       │           status="under_review"
+└───┬──────────────┘
+    │  confirmation
+    ▼
+Appeal Endpoint assembles response
+    │
+    │  {content_id, status="under_review", message}
+    ▼
+  Client
+
+
+COMPONENT SUMMARY
+─────────────────
+  Rate Limiter         Flask-Limiter on /submit only. Gate before any logic runs.
+  Submission Endpoint  Orchestrator. Calls signals, scorer, label generator, logger.
+  Signal 1 (LLM)       Sends text to Groq. Returns llm_score (0–1).
+  Signal 2 (Stylo)     Pure Python heuristics. Returns stylometric_score (0–1).
+  Confidence Scorer    Combines scores: (llm * 0.65) + (stylo * 0.35).
+  Label Generator      Maps confidence + attribution to verbatim label text.
+  Audit Logger         Writes/updates structured entries. Shared by both flows.
+  Appeal Endpoint      Looks up record, updates status, calls logger, returns confirmation.
+  Storage (SQLite)     Keyed by content_id. One record per submission.
