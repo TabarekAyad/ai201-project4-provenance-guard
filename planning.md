@@ -130,3 +130,16 @@ The individual signal scores are the key piece — a reviewer can see whether th
 
 ---
 
+## Anticipated Edge Cases
+
+### 1. Non-native English speaker writing formally
+A writer whose second language is English tends to write carefully: measured vocabulary, even sentence rhythm, hedged claims. The LLM classifier reads the diplomatic register as AI-like. The stylometric signal sees low sentence-length variance and moderate TTR. Both signals fire in the wrong direction. Combined score: potentially 0.65–0.75, landing in the uncertain or low-AI band. Mitigation: the wide uncertain band absorbs many of these cases. The appeal workflow handles the rest. The label in the uncertain zone explicitly invites appeal.
+
+### 2. Very short text (under 80 words)
+A haiku, a two-sentence bio, a single paragraph. The TTR metric is unreliable at small sample sizes — any short text has high unique-word ratios by definition. Sentence length variance is unstable with 2–3 sentences. The stylometric signal is effectively noise. The LLM signal carries the full weight of the combined score (still blended 65/35, but 35% of noise is still noise). The system will return a score driven almost entirely by the LLM, which may be appropriate, but the stylometric component should not be trusted. Mitigation: log a warning internally when text is under 80 words; do not surface it to users. Consider widening the uncertain band for short texts in a future version.
+
+### 3. Highly structured human writing (legal, academic, technical)
+A legal brief or academic abstract written by a human is uniformly structured by professional convention: formal register, low variance, moderate vocabulary, minimal punctuation eccentricity. The stylometric signal will flag it as AI-like. The LLM may also flag the impersonal register. This is a genre-blind failure mode for both signals. Mitigation: none within the current pipeline — this is an acknowledged limitation to document in the README.
+
+---
+
