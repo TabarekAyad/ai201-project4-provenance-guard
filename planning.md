@@ -102,3 +102,31 @@ Three variants. Written here verbatim — the label generator will return exactl
 
 ---
 
+## Appeals Workflow
+
+### Who can appeal
+Any creator who has a `content_id` from a prior `/submit` response. The system does not authenticate or verify identity — the `content_id` is the credential. In a production system, this would be gated behind session auth, but that is out of scope here.
+
+### What they provide
+- `content_id` — the UUID from their submission response (required)
+- `creator_reasoning` — a free-text explanation of why the classification is wrong (required, no length limit enforced)
+
+### What the system does on appeal receipt
+1. Looks up the record by `content_id`. Returns 404 if not found.
+2. Updates the record's `status` field from `"classified"` to `"under_review"`.
+3. Appends to the audit log entry: `appeal_reasoning`, `appeal_timestamp`, updated `status`.
+4. Returns confirmation: `{content_id, status: "under_review", message}`.
+
+No automated re-classification. No score is recalculated. The appeal is a human-review trigger, not a pipeline re-run.
+
+### What a human reviewer sees in the appeal queue (GET /log)
+For any entry with `status: "under_review"`, the log exposes:
+- Original `attribution`, `confidence`, `llm_score`, `stylometric_score`
+- The label text that was shown to the user
+- `appeal_reasoning` (creator's verbatim explanation)
+- `appeal_timestamp`
+
+The individual signal scores are the key piece — a reviewer can see whether the signals agreed (strong case) or disagreed (ambiguous case worth reviewing closely). A non-native speaker explaining their formal register alongside a `stylometric_score` of 0.61 and `llm_score` of 0.74 gives a reviewer enough to make an informed judgment.
+
+---
+
