@@ -143,3 +143,124 @@ A legal brief or academic abstract written by a human is uniformly structured by
 
 ---
 
+## Architecture
+
+### Diagram
+
+```
+FLOW 1: SUBMISSION
+──────────────────
+
+  Client
+    │
+    │  POST /submit  {text, creator_id}
+    ▼
+┌─────────────┐
+│ Rate Limiter│  ── 429 if over limit ──────────────────────────────► Client
+└──────┬──────┘
+       │  {text, creator_id}
+       ▼
+┌──────────────────┐
+│ Submission       │  generates content_id (UUID)
+│ Endpoint         │
+│ POST /submit     │
+└───┬──────────────┘
+    │                          │
+    │  raw text                │  raw text
+    ▼                          ▼
+┌──────────────┐       ┌──────────────────────┐
+│ Signal 1     │       │ Signal 2             │
+│ LLM          │       │ Stylometric          │
+│ Classifier   │       │ Heuristics           │
+│ (Groq API)   │       │ (pure Python)        │
+└──────┬───────┘       └──────────┬───────────┘
+       │  llm_score (0–1)         │  stylometric_score (0–1)
+       └──────────┬───────────────┘
+                  │  llm_score + stylometric_score
+                  ▼
+         ┌─────────────────┐
+         │ Confidence      │
+         │ Scorer          │
+         │ (0.65/0.35 mix) │
+         └────────┬────────┘
+                  │  confidence (0–1) + attribution
+                  ▼
+         ┌─────────────────┐
+         │ Label           │
+         │ Generator       │
+         └────────┬────────┘
+                  │  label text (verbatim string)
+                  ▼
+         ┌─────────────────┐
+         │ Audit Logger    │  writes structured entry to SQLite
+         └────────┬────────┘
+                  │
+                  ▼
+    {content_id, attribution, confidence, label, status} ──► Client
+
+
+FLOW 2: APPEAL
+──────────────
+
+  Client
+    │
+    │  POST /appeal  {content_id, creator_reasoning}
+    ▼
+┌──────────────────┐
+│ Appeal Endpoint  │
+└───┬──────────────┘
+    │  content_id
+    ▼
+┌──────────────────┐
+│ Storage Lookup   │  ── 404 if not found ───────────────────────────► Client
+└───┬──────────────┘
+    │  record found
+    ▼
+┌──────────────────┐
+│ Status Update    │  "classified" → "under_review"
+└───┬──────────────┘
+    │  updated record + creator_reasoning
+    ▼
+┌──────────────────┐
+│ Audit Logger     │  appends appeal_reasoning, appeal_timestamp
+└───┬──────────────┘
+    │
+    ▼
+    {content_id, status: "under_review", message} ──► Client
+```
+### Narrative
+
+A submission enters through the rate-limited `/submit` endpoint, which orchestrates the full pipeline: both signals run on the raw text, the confidence scorer combines their outputs using a 65/35 weighted average, the label generator maps the score to verbatim label text, and the audit logger writes the complete structured entry to SQLite before the response is returned. An appeal enters through `/appeal`, which looks up the existing record by `content_id`, updates its status, and appends the creator's reasoning to the same audit log entry — no re-classification occurs.
+
+---
+
+## AI Tool Plan
+
+### Milestone 3 — Submission endpoint + Signal 1
+
+**Sections to provide:** Detection Signals (Signal 1 only), Architecture diagram (Flow 1 only), API surface contract for `POST /submit`.
+
+**What to ask for:** Flask app skeleton with `POST /submit` route stub that accepts `{text, creator_id}` and returns a hardcoded response; plus the `classify_with_llm(text)` function that calls Groq with the structured prompt and returns `llm_score` as a float.
+
+**How to verify:** Call `classify_with_llm()` directly with the four test inputs from the spec (clearly AI, clearly human, two borderline). Confirm the function returns a float between 0 and 1 and that the clearly-AI input scores noticeably higher than the clearly-human input before wiring into the endpoint.
+
+---
+
+### Milestone 4 — Signal 2 + confidence scoring
+
+**Sections to provide:** Detection Signals (Signal 2), Uncertainty Representation (thresholds + weighting), Architecture diagram (confidence scorer box).
+
+**What to ask for:** `compute_stylometrics(text)` function that returns `stylometric_score` as a float; plus `compute_confidence(llm_score, stylometric_score)` that applies the 65/35 weighting and returns `{confidence, attribution}`.
+
+**How to verify:** Run all four test inputs through both signals independently and print scores side by side. Check that clearly-AI input scores above 0.75 and clearly-human input scores below 0.35. If borderline inputs land in 0.36–0.74, the scorer is calibrated correctly.
+
+---
+
+### Milestone 5 — Production layer
+
+**Sections to provide:** Transparency Label Design (all three variants verbatim), Appeals Workflow, Architecture diagram (both flows), API surface contract for `POST /appeal` and `GET /log`.
+
+**What to ask for:** `generate_label(confidence, attribution)` function that returns verbatim label text; `POST /appeal` endpoint implementation; Flask-Limiter setup on `/submit`; `GET /log` endpoint.
+
+**How to verify:** Submit inputs targeting each confidence zone and confirm all three label variants are returned. Submit an appeal for a known `content_id` and confirm `GET /log` shows `status: "under_review"` and `appeal_reasoning` populated. Run 12 rapid requests to `/submit` and confirm requests 11–12 return 429.
+
