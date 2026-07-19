@@ -2,6 +2,8 @@ import uuid
 from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from db import init_db, log_event, read_log
+
 
 app = Flask(__name__)
 
@@ -23,12 +25,27 @@ def submit():
     text = data.get("text")
     creator_id = data.get("creator_id")
 
-    # Placeholder response — wire in your detection signal next.
+    content_id = str(uuid.uuid4())
+
+    # Placeholder values — replaced by real signals in Milestone 4.
+    attribution = "uncertain"
+    confidence = 0.5
+    label = "We're not sure who wrote this."
+
+    log_event({
+        "content_id": content_id,
+        "creator_id": creator_id,
+        "attribution": attribution,
+        "confidence": confidence,
+        "status": "classified",
+    })
+
     return jsonify({
-        "content_id": str(uuid.uuid4()),
-        "attribution": "uncertain",
-        "confidence": 0.5,
-        "label": "We're not sure who wrote this.",
+        "content_id": content_id,
+        "attribution": attribution,
+        "confidence": confidence,
+        "label": label,
+        "status": "classified",
     })
 
 
@@ -45,5 +62,10 @@ def appeal():
         "message": "Your appeal was received and is under review.",
     })
 
+@app.route("/log", methods=["GET"])
+def view_log():
+    return jsonify({"entries": read_log()})
+
 if __name__ == "__main__":
+    init_db()
     app.run(port=5000, debug=True)
