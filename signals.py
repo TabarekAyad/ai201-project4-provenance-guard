@@ -1,4 +1,7 @@
 import os
+import re
+import math
+import string
 import json
 from groq import Groq
 from dotenv import load_dotenv
@@ -23,6 +26,38 @@ ai_score meaning:
   1.0 = extremely confident the text is AI-generated
   0.0 = extremely confident the text is human-written
 """
+
+def compute_stylometrics(text: str) -> dict:
+    """Return {"stylometric_score": float 0-1} from three surface heuristics."""
+    words = text.split()
+    total_words = len(words)
+
+    if total_words == 0:
+        return {"stylometric_score": 0.5}
+
+    # --- sentence length variance (std dev of per-sentence word counts) ---
+    sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
+    if len(sentences) >= 2:
+        lengths = [len(s.split()) for s in sentences]
+        mean = sum(lengths) / len(lengths)
+        std_dev = math.sqrt(sum((l - mean) ** 2 for l in lengths) / len(lengths))
+        sent_score = 1 - min(std_dev / 30, 1)
+    else:
+        sent_score = 0.5
+
+    # --- type-token ratio ---
+    unique_words = len(set(w.lower().strip(string.punctuation) for w in words))
+    ttr = unique_words / total_words
+    ttr_score = 1 - min(ttr / 0.8, 1)
+
+    # --- punctuation density ---
+    punct_count = sum(1 for ch in text if ch in string.punctuation)
+    density = punct_count / total_words
+    punct_score = 1 - min(density / 0.15, 1)
+
+    stylometric_score = (sent_score + ttr_score + punct_score) / 3
+    return {"stylometric_score": round(stylometric_score, 4)}
+
 
 def classify_with_llm(text: str) -> dict:
     """Return {"ai_score": float 0-1, "reasoning": str} for the given text."""
