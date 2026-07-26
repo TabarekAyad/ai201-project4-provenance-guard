@@ -3,6 +3,7 @@ from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from db import init_db, log_event, read_log
+from signals import classify_with_llm
 
 
 app = Flask(__name__)
@@ -27,16 +28,26 @@ def submit():
 
     content_id = str(uuid.uuid4())
 
-    # Placeholder values — replaced by real signals in Milestone 4.
-    attribution = "uncertain"
-    confidence = 0.5
-    label = "We're not sure who wrote this."
+    llm_result = classify_with_llm(text)
+    llm_score = llm_result["ai_score"]
+
+    if llm_score >= 0.75:
+        attribution = "likely_ai"
+    elif llm_score <= 0.35:
+        attribution = "likely_human"
+    else:
+        attribution = "uncertain"
+
+    # Confidence and label are placeholders until Signal 2 lands in Milestone 4.
+    confidence = llm_score
+    label = "Preliminary classification — full analysis pending."
 
     log_event({
         "content_id": content_id,
         "creator_id": creator_id,
         "attribution": attribution,
         "confidence": confidence,
+        "llm_score": llm_score,
         "status": "classified",
     })
 
