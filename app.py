@@ -3,7 +3,7 @@ from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from db import init_db, log_event, read_log
-from signals import classify_with_llm
+from signals import classify_with_llm, compute_stylometrics, compute_confidence, generate_label
 
 
 app = Flask(__name__)
@@ -29,18 +29,14 @@ def submit():
     content_id = str(uuid.uuid4())
 
     llm_result = classify_with_llm(text)
+    stylo_result = compute_stylometrics(text)
     llm_score = llm_result["ai_score"]
+    stylometric_score = stylo_result["stylometric_score"]
 
-    if llm_score >= 0.75:
-        attribution = "likely_ai"
-    elif llm_score <= 0.35:
-        attribution = "likely_human"
-    else:
-        attribution = "uncertain"
-
-    # Confidence and label are placeholders until Signal 2 lands in Milestone 4.
-    confidence = llm_score
-    label = "Preliminary classification — full analysis pending."
+    conf_result = compute_confidence(llm_score, stylometric_score)
+    confidence = conf_result["confidence"]
+    attribution = conf_result["attribution"]
+    label = generate_label(confidence, attribution)
 
     log_event({
         "content_id": content_id,
@@ -48,6 +44,7 @@ def submit():
         "attribution": attribution,
         "confidence": confidence,
         "llm_score": llm_score,
+        "stylometric_score": stylometric_score,
         "status": "classified",
     })
 
