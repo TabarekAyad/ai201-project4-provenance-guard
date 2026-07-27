@@ -98,6 +98,18 @@ FLOW 2: APPEAL
 
 ---
 
+## Rate Limiting
+
+`POST /submit` is rate-limited to **10 requests per minute** and **100 requests per day** per IP address, enforced by Flask-Limiter. `POST /appeal` and `GET /log` are not rate-limited.
+
+The per-minute limit of 10 prevents burst abuse. A creator submitting one piece at a time will never hit it; an automated script trying to probe the classifier or exhaust the Groq quota would be blocked within seconds. 10/min was chosen over a stricter limit (e.g. 3/min) because legitimate users doing milestone testing need to submit several inputs in quick succession without being blocked by their own tooling.
+
+The per-day limit of 100 targets sustained high-volume use. Each `/submit` call triggers a Groq API call, which costs real tokens and incurs rate limits on the Groq side. 100 daily submissions per IP is far above any realistic individual use — even aggressive testing in a single session stays well under — while still creating a meaningful ceiling if someone runs a loop against the endpoint overnight.
+
+Limiting by IP rather than by `creator_id` is a deliberate choice: `creator_id` is a self-reported string in the request body with no authentication behind it. Anyone could pass `creator_id: "someone_else"` to route around a per-creator limit. IP is the only enforceable identifier without adding a full auth layer, which is out of scope.
+
+---
+
 ## Detection Signals
 
 **Signal 1 — LLM classifier (Groq / Llama-3.3-70b-versatile)**
