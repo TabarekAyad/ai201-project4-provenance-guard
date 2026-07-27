@@ -158,3 +158,21 @@ The 0.484-point gap between these two cases (0.7665 vs 0.2825) spans the full `l
 The LLM signal compounds this for formal writing. The classifier (Llama-3.3-70b-versatile) is a general-purpose language model, not a purpose-built detector. It was trained on a corpus that includes large amounts of AI-generated text, which skews toward formal, structured prose. When a human writes in that register — grant proposals, medical summaries, technical reports — the model has less basis for distinguishing it from AI output and tends to return elevated `ai_score` values. Since the LLM carries 65% of the final weight, a moderate LLM score on formal human text is enough to land the result in the uncertain band or above even if the stylometrics are neutral.
 
 The practical consequence: the system is more reliable for clearly casual human text than for carefully edited human text, and more reliable for generic AI output than for AI text that was prompted to sound informal or first-person. Content in the uncertain band (confidence 0.36–0.74) should not be acted on without human review — the wide band exists precisely because these signals cannot resolve ambiguous cases.
+
+---
+
+## Spec Reflection
+
+**Where the spec guided the implementation.**
+
+The planning document worked through a specific false-positive scenario before any code was written: a non-native English speaker submitting a careful, formal personal essay that both signals would read as AI-generated. The conclusion from that exercise was that the cost of false positives on a writing platform is asymmetric — a wrongly flagged human creator has real recourse consequences, while a missed AI submission is a softer failure. That reasoning produced two concrete decisions that show up directly in the code.
+
+First, it set the uncertain band wide (0.36–0.74) rather than the more intuitive (0.45–0.55). A system with a narrow uncertain zone would force a confident-looking label onto a score of 0.68 even though one signal agreed and the other hedged. The `compute_confidence` function's thresholds — `≥ 0.75` for `likely_ai` and `≤ 0.35` for `likely_human` — are not arbitrary round numbers; they came directly from reasoning about where the system should and shouldn't be willing to make a strong claim.
+
+Second, it determined that individual signal scores had to be stored in the audit log separately from the combined score. The spec noted that a human reviewer seeing `llm_score: 0.79, stylometric_score: 0.63` can tell the signals partially disagreed and weight an appeal accordingly — whereas a reviewer who only sees `confidence: 0.71` cannot. The `audit_log` table schema stores `llm_score` and `stylometric_score` as distinct columns because the spec made the case that the combined score alone is not enough for a meaningful human review.
+
+**Where the implementation diverged from the spec.**
+
+The spec defined `GET /log` with an optional `?limit=N` query parameter, defaulting to all entries. The implementation does not support it. `view_log()` in `app.py` calls `read_log()` with no arguments, and `read_log()` in `db.py` hardcodes `LIMIT 20` unconditionally — the query parameter is never read.
+
+The divergence happened for a straightforward reason: `GET /log` existed for audit visibility during testing and grading, not as a production query interface. During implementation, the focus was on getting the detection pipeline and appeal workflow correct, and the configurable limit was a secondary concern that was never wired up. The hardcoded 20 was sufficient for every real use of the endpoint during the project, so nothing surfaced the gap. The spec's `?limit=N` design was the right call for a real system — a reviewer working through a large backlog of appeals needs to fetch more than 20 records — but the project's actual usage pattern never created pressure to implement it.
