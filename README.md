@@ -161,6 +161,22 @@ The practical consequence: the system is more reliable for clearly casual human 
 
 ---
 
+## AI Usage
+
+**Instance 1 — implementing the stylometric heuristics**
+
+The planning document had fully specified all three normalization formulas before any code was written: sentence length variance mapped via `1 - min(std_dev / 30, 1)`, TTR via `1 - min(ttr / 0.8, 1)`, punctuation density via `1 - min(density / 0.15, 1)`. I directed the AI to implement `compute_stylometrics()` from those formulas, and it produced the function in a single pass — correctly using population standard deviation (not sample), correctly stripping punctuation from tokens before the TTR set, and adding section-header comments for each heuristic. The code was accepted without structural change.
+
+What required revision was the interpretation of the output. When the four test inputs were run through both signals in the comparison table, clearly-human casual text scored `stylometric_score: 0.278` and clearly-AI formal text scored `stylometric_score: 0.2956` — a gap of 0.018 points, effectively noise. The stylometric signal was not separating those two inputs at all. The AI had implemented the formulas exactly as specified; the problem was in the spec's assumption that the normalization ceilings (30, 0.8, 0.15) would produce meaningful spread. Rather than asking the AI to recalibrate the ceilings, I overrode that direction — the parameters were kept as-is and the limitation was documented instead. The 65% weight on the LLM signal absorbed the gap; the stylometric component's real value is as a tiebreaker when the LLM score is in the borderline range, not as a standalone discriminator.
+
+**Instance 2 — wiring the LLM signal into `/submit` before Signal 2 was ready**
+
+I directed the AI to connect the working LLM classifier into the submission endpoint as an intermediate step, explicitly noting that the blended scorer didn't exist yet and the wiring should be temporary. It produced a version of `/submit` that assigned `confidence = llm_score` directly and applied the attribution thresholds to the raw LLM score inline — with an if/elif block inside the route function itself and a placeholder label string ("Preliminary classification — full analysis pending."). This matched the instruction: get real scores flowing before the full pipeline was assembled.
+
+When Signal 2 and the confidence scorer landed, I directed the AI to replace this intermediate. The override was more complete than a simple substitution. The if/elif attribution block was removed from `app.py` entirely — along with the direct `confidence = llm_score` line — and the route was refactored to delegate everything to the signals module: `classify_with_llm`, `compute_stylometrics`, `compute_confidence`, `generate_label` each called in sequence with no logic in the route itself. I pushed this direction specifically because keeping the threshold logic in the route (even updated for the blended score) would have split the classification logic across two files. The AI produced a clean delegation-only route on the first attempt, but that structure came from an explicit instruction, not from the AI proposing it on its own.
+
+---
+
 ## Spec Reflection
 
 **Where the spec guided the implementation.**
