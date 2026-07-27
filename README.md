@@ -95,3 +95,56 @@ FLOW 2: APPEAL
 ```
 
 **Storage:** SQLite (`audit_log.db`) via `db.py`. All signal scores, confidence, attribution, label, and appeal data are written to a single `audit_log` table. `GET /log` returns the 20 most recent entries as JSON.
+
+---
+
+## Confidence Scoring
+
+The confidence score is a weighted blend of the two signals: `0.65 × llm_score + 0.35 × stylometric_score`. Scores ≥ 0.75 map to `likely_ai`, ≤ 0.35 map to `likely_human`, and everything in between is `uncertain`. The wide uncertain band is intentional — the system treats false positives as more costly than false negatives.
+
+The examples below are taken from Milestone 4 testing and show that the scorer produces real variation across inputs, not a constant output.
+
+**Example 1 — high confidence AI-generated text**
+
+Input (formal, uniform-sentence-length AI prose):
+```
+Artificial intelligence (AI) has emerged as a transformative technology with
+far-reaching implications across numerous sectors. It is important to note that
+its impact extends beyond mere automation, encompassing complex decision-making
+processes that were previously exclusive to human cognition. Furthermore, the
+integration of machine learning algorithms has enabled unprecedented advancements
+in data analysis and pattern recognition.
+```
+
+Response:
+```json
+{
+  "attribution": "likely_ai",
+  "confidence": 0.7665,
+  "llm_score": 0.9,
+  "stylometric_score": 0.5186,
+  "label": "AI-assisted content detected. Our system found strong indicators that this content was likely generated or substantially written by an AI tool (confidence: 77%). If this classification is wrong, the creator can submit an appeal."
+}
+```
+
+**Example 2 — lower confidence, human-written text**
+
+Input (casual, conversational, irregular punctuation):
+```
+i was making eggs this morning and dropped the whole carton on the floor. like,
+all 12. just gone. the dog was thrilled obviously. i just stood there for a second
+not sure if i should laugh or cry, decided on both
+```
+
+Response:
+```json
+{
+  "attribution": "likely_human",
+  "confidence": 0.2825,
+  "llm_score": 0.2,
+  "stylometric_score": 0.4356,
+  "label": "Appears human-written. Our system found strong indicators that this content was written by a human (confidence: 72% human). No action is required."
+}
+```
+
+The 0.484-point gap between these two cases (0.7665 vs 0.2825) spans the full `likely_ai`-to-`likely_human` range and reflects genuine signal agreement: the LLM score alone moves from 0.9 to 0.2, while stylometrics shift less dramatically (0.52 → 0.44) because the human text's short sentences and low punctuation density push the stylometric score toward the uncertain band.
