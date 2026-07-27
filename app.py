@@ -2,7 +2,7 @@ import uuid
 from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from db import init_db, log_event, read_log
+from db import init_db, log_event, read_log, get_entry, log_appeal
 from signals import classify_with_llm, compute_stylometrics, compute_confidence, generate_label
 
 
@@ -63,7 +63,11 @@ def appeal():
     content_id = data.get("content_id")
     reasoning = data.get("creator_reasoning")
 
-    # Update the content's status and log the appeal (see section 6).
+    if not get_entry(content_id):
+        return jsonify({"error": "content_id not found"}), 404
+
+    log_appeal(content_id, reasoning)
+
     return jsonify({
         "content_id": content_id,
         "status": "under_review",

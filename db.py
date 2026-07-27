@@ -14,10 +14,13 @@ def init_db():
                 confidence REAL,
                 llm_score REAL,
                 stylometric_score REAL,
-                status TEXT
+                status TEXT,
+                appeal_reasoning TEXT,
+                appeal_timestamp TEXT
             )
         """)
-        for col in ("llm_score REAL", "stylometric_score REAL"):
+        for col in ("llm_score REAL", "stylometric_score REAL",
+                    "appeal_reasoning TEXT", "appeal_timestamp TEXT"):
             try:
                 conn.execute(f"ALTER TABLE audit_log ADD COLUMN {col}")
             except sqlite3.OperationalError:
@@ -30,6 +33,27 @@ def log_event(entry):
             "(content_id, creator_id, timestamp, attribution, confidence, llm_score, stylometric_score, status) "
             "VALUES (:content_id, :creator_id, :timestamp, :attribution, :confidence, :llm_score, :stylometric_score, :status)",
             {**entry, "timestamp": datetime.now(timezone.utc).isoformat()},
+        )
+
+def get_entry(content_id):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM audit_log WHERE content_id = ?", (content_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+def log_appeal(content_id, appeal_reasoning):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE audit_log SET status = 'under_review', "
+            "appeal_reasoning = :reasoning, appeal_timestamp = :ts "
+            "WHERE content_id = :content_id",
+            {
+                "content_id": content_id,
+                "reasoning": appeal_reasoning,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            },
         )
 
 def read_log(limit=20):
