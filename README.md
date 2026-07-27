@@ -98,6 +98,30 @@ FLOW 2: APPEAL
 
 ---
 
+## Detection Signals
+
+**Signal 1 — LLM classifier (Groq / Llama-3.3-70b-versatile)**
+
+Sends the raw text to the Groq API with a structured system prompt and returns `ai_score` (0–1) alongside a one-sentence reasoning string. The model assesses semantic and stylistic patterns holistically: characteristic hedging phrases ("it is important to note"), over-structured argumentation, unnaturally smooth transitions, absence of a specific personal voice, and uniform register across the whole piece.
+
+This signal was chosen because it captures patterns that no surface heuristic can reach. A sentence like "Furthermore, the integration of machine learning algorithms has enabled unprecedented advancements" signals AI not through its length or punctuation but through its phrasing — something only a language model trained on massive text corpora can assess reliably. The prompt contract (`temperature=0.0`, strict JSON-only output, explicit 0–1 scale) keeps responses consistent across calls, and the output is clamped to `[0.0, 1.0]` before use in case of rounding edge cases.
+
+What it misses: lightly edited AI output where a human has added personal details or broken the smooth register; formal human writing that uses the same diplomatic phrasing AI defaults to; non-native English speakers whose careful construction resembles AI output; and AI text that was explicitly prompted to sound casual or first-person.
+
+**Signal 2 — Stylometric heuristics (pure Python)**
+
+Computes three statistical surface properties and averages them into a single `stylometric_score` (0–1, higher = more AI-like):
+
+- **Sentence length variance**: population standard deviation of per-sentence word counts, mapped via `1 - min(std_dev / 30, 1)`. Low variance → uniform rhythm → high score. AI text tends to cluster sentences around a comfortable medium; human writing is more irregular.
+- **Type-token ratio (TTR)**: `unique_words / total_words`, mapped via `1 - min(ttr / 0.8, 1)`. Low TTR → repetitive vocabulary → high score. AI output within a single passage tends to reuse the same domain terms; human writing tends to paraphrase more.
+- **Punctuation density**: `punctuation_marks / total_words`, mapped via `1 - min(density / 0.15, 1)`. Very low density → clean, rule-following prose → high score. Human writing uses punctuation more idiosyncratically (em dashes, ellipses, fragments).
+
+This signal was chosen because it is fully independent of the LLM — no API call, no network dependency, deterministic output for the same input. That independence matters for the scoring design: when both signals agree, confidence rises; when they disagree, the combined score sits in the uncertain band. A second LLM call would not provide this independence since both calls would share the same underlying model biases.
+
+What it misses: texts under ~80 words, where TTR is unreliable at small sample sizes and sentence variance is unstable with fewer than three sentences (the code falls back to `sent_score = 0.5`); genre-specific formal writing (legal, academic, technical) where structural uniformity is a professional convention, not an AI signature; and AI text deliberately prompted to introduce variety.
+
+---
+
 ## Confidence Scoring
 
 The confidence score is a weighted blend of the two signals: `0.65 × llm_score + 0.35 × stylometric_score`. Scores ≥ 0.75 map to `likely_ai`, ≤ 0.35 map to `likely_human`, and everything in between is `uncertain`. The wide uncertain band is intentional — the system treats false positives as more costly than false negatives.
