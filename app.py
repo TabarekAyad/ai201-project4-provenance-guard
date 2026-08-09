@@ -45,6 +45,7 @@ def submit():
         "confidence": confidence,
         "llm_score": llm_score,
         "stylometric_score": stylometric_score,
+        "label": label,
         "status": "classified",
     })
 

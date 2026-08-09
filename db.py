@@ -21,6 +21,7 @@ def init_db():
                     confidence REAL,
                     llm_score REAL,
                     stylometric_score REAL,
+                    label TEXT,
                     status TEXT,
                     appeal_reasoning TEXT,
                     appeal_timestamp TEXT
@@ -35,8 +36,8 @@ def log_event(entry):
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO audit_log "
-                "(content_id, creator_id, timestamp, attribution, confidence, llm_score, stylometric_score, status) "
-                "VALUES (:content_id, :creator_id, :timestamp, :attribution, :confidence, :llm_score, :stylometric_score, :status)",
+                "(content_id, creator_id, timestamp, attribution, confidence, llm_score, stylometric_score, label, status) "
+                "VALUES (:content_id, :creator_id, :timestamp, :attribution, :confidence, :llm_score, :stylometric_score, :label, :status)",
                 {**entry, "timestamp": datetime.now(timezone.utc).isoformat()},
             )
     except Exception:
