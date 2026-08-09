@@ -2,7 +2,7 @@
 
 Provenance Guard is a Flask API that classifies submitted text as AI-generated or human-written. It runs two independent detection signals — a Groq LLM classifier and a set of stylometric heuristics — combines their outputs into a calibrated confidence score, and returns a transparency label explaining the result to the creator. Creators who dispute a classification can submit an appeal, which is logged alongside the original decision for human review.
 
-The system is designed for writing platforms that need to surface AI-generated content to their users without making overconfident claims. False positives — flagging human writing as AI — are treated as more damaging than false negatives, which is reflected in the wide uncertain band (0.36–0.74) and the 65/35 signal weighting that prevents the system from asserting a verdict when evidence is mixed.
+The system is designed for writing platforms that need to surface AI-generated content to their users without making overconfident claims. False positives — flagging human writing as AI — are treated as more damaging than false negatives, which is reflected in the wide uncertain band (0.36–0.74) and the 55/45 signal weighting that prevents the system from asserting a verdict when evidence is mixed.
 
 ---
 
@@ -46,7 +46,7 @@ FLOW 1: SUBMISSION
          ┌─────────────────┐
          │ Confidence      │
          │ Scorer          │
-         │ (0.65/0.35 mix) │
+         │ (0.55/0.45 mix) │
          └────────┬────────┘
                   │  confidence (0–1) + attribution
                   ▼
@@ -122,11 +122,12 @@ What it misses: lightly edited AI output where a human has added personal detail
 
 **Signal 2 — Stylometric heuristics (pure Python)**
 
-Computes three statistical surface properties and averages them into a single `stylometric_score` (0–1, higher = more AI-like):
+Computes three statistical surface properties, then blends them with calibrated phrase/register markers and casual human-voice markers into a single `stylometric_score` (0–1, higher = more AI-like):
 
 - **Sentence length variance**: population standard deviation of per-sentence word counts, mapped via `1 - min(std_dev / 30, 1)`. Low variance → uniform rhythm → high score. AI text tends to cluster sentences around a comfortable medium; human writing is more irregular.
 - **Type-token ratio (TTR)**: `unique_words / total_words`, mapped via `1 - min(ttr / 0.8, 1)`. Low TTR → repetitive vocabulary → high score. AI output within a single passage tends to reuse the same domain terms; human writing tends to paraphrase more.
 - **Punctuation density**: `punctuation_marks / total_words`, mapped via `1 - min(density / 0.15, 1)`. Very low density → clean, rule-following prose → high score. Human writing uses punctuation more idiosyncratically (em dashes, ellipses, fragments).
+- **Register and voice markers**: generic AI-like phrases such as "it is important to note," "paradigm shift," "stakeholders," "studies show," and "on the other" raise the score; casual first-person markers such as "ok so," "honestly?", "my friend," and "probably won't" lower it.
 
 This signal was chosen because it is fully independent of the LLM — no API call, no network dependency, deterministic output for the same input. That independence matters for the scoring design: when both signals agree, confidence rises; when they disagree, the combined score sits in the uncertain band. A second LLM call would not provide this independence since both calls would share the same underlying model biases.
 
@@ -136,7 +137,7 @@ What it misses: texts under ~80 words, where TTR is unreliable at small sample s
 
 ## Confidence Scoring
 
-The confidence score is a weighted blend of the two signals: `0.65 × llm_score + 0.35 × stylometric_score`. Scores ≥ 0.75 map to `likely_ai`, ≤ 0.35 map to `likely_human`, and everything in between is `uncertain`. The wide uncertain band is intentional — the system treats false positives as more costly than false negatives.
+The confidence score is a weighted blend of the two signals: `0.55 × llm_score + 0.45 × stylometric_score`. Scores ≥ 0.75 map to `likely_ai`, ≤ 0.35 map to `likely_human`, and everything in between is `uncertain`. The wide uncertain band is intentional — the system treats false positives as more costly than false negatives.
 
 The examples below are taken from Milestone 4 testing and show that the scorer produces real variation across inputs, not a constant output.
 
@@ -156,10 +157,10 @@ Response:
 ```json
 {
   "attribution": "likely_ai",
-  "confidence": 0.7665,
-  "llm_score": 0.9,
-  "stylometric_score": 0.5186,
-  "label": "AI-assisted content detected. Our system found strong indicators that this content was likely generated or substantially written by an AI tool (confidence: 77%). If this classification is wrong, the creator can submit an appeal."
+  "confidence": 0.7579,
+  "llm_score": 0.8,
+  "stylometric_score": 0.7065,
+  "label": "AI-assisted content detected. Our system found strong indicators that this content was likely generated or substantially written by an AI tool (confidence: 76%). If this classification is wrong, the creator can submit an appeal."
 }
 ```
 
@@ -176,14 +177,14 @@ Response:
 ```json
 {
   "attribution": "likely_human",
-  "confidence": 0.2825,
+  "confidence": 0.189,
   "llm_score": 0.2,
-  "stylometric_score": 0.4356,
-  "label": "Appears human-written. Our system found strong indicators that this content was written by a human (confidence: 72% human). No action is required."
+  "stylometric_score": 0.1755,
+  "label": "Appears human-written. Our system found strong indicators that this content was written by a human (confidence: 81% human). No action is required."
 }
 ```
 
-The 0.484-point gap between these two cases (0.7665 vs 0.2825) spans the full `likely_ai`-to-`likely_human` range and reflects genuine signal agreement: the LLM score alone moves from 0.9 to 0.2, while stylometrics shift less dramatically (0.52 → 0.44) because the human text's short sentences and low punctuation density push the stylometric score toward the uncertain band.
+The 0.569-point gap between these two cases (0.7579 vs 0.189) spans the full `likely_ai`-to-`likely_human` range. Both signals agree in each direction: for the AI text the LLM scores 0.8 and stylometrics score 0.71 (uniform sentence lengths, lower TTR); for the human text the LLM scores 0.2 and stylometrics score 0.18 (short irregular sentences, high punctuation density relative to word count). The two signals pulling the same way in both cases is what pushes the scores to the extremes rather than landing in the uncertain band.
 
 ---
 

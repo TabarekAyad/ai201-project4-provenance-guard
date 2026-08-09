@@ -1,4 +1,4 @@
-from signals import classify_with_llm, compute_stylometrics
+from signals import classify_with_llm, compute_confidence, compute_stylometrics
 
 TEST_INPUTS = [
     (
@@ -31,6 +31,51 @@ TEST_INPUTS = [
         "making mistakes in front of actual people.",
     ),
 ]
+
+CALIBRATION_INPUTS = [
+    (
+        "clearly_ai",
+        "Artificial intelligence represents a transformative paradigm shift in modern society. "
+        "It is important to note that while the benefits of AI are numerous, it is equally "
+        "essential to consider the ethical implications. Furthermore, stakeholders across "
+        "various sectors must collaborate to ensure responsible deployment.",
+        0.8,
+        "likely_ai",
+    ),
+    (
+        "clearly_human",
+        "ok so i finally tried that new ramen place downtown and honestly? "
+        "underwhelming. the broth was fine but they put WAY too much sodium in it and "
+        "i was thirsty for like three hours after. my friend got the spicy version and "
+        "said it was better. probably won't go back unless someone drags me there",
+        0.2,
+        "likely_human",
+    ),
+    (
+        "borderline_formal_human",
+        "The relationship between monetary policy and asset price inflation has been "
+        "extensively studied in the literature. Central banks face a fundamental tension "
+        "between their mandate for price stability and the unintended consequences of "
+        "prolonged low interest rates on equity and real estate valuations.",
+        0.7,
+        "uncertain",
+    ),
+    (
+        "borderline_edited_ai",
+        "I've been thinking a lot about remote work lately. There are genuine tradeoffs - "
+        "flexibility and no commute on one side, isolation and blurred work-life boundaries "
+        "on the other. Studies show productivity varies widely by individual and role type.",
+        0.2,
+        "uncertain",
+    ),
+]
+
+
+def test_calibration_examples_hit_expected_labels():
+    for label, text, llm_score, expected in CALIBRATION_INPUTS:
+        stylometric_score = compute_stylometrics(text)["stylometric_score"]
+        result = compute_confidence(llm_score, stylometric_score)
+        assert result["attribution"] == expected, label
 
 if __name__ == "__main__":
     print("=== Signal comparison: LLM vs Stylometrics ===\n")

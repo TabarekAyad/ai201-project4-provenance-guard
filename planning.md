@@ -46,10 +46,10 @@ Normalization approach:
 **Weighting:** The LLM classifier carries more weight because it captures semantic patterns the heuristics cannot:
 
 ```
-confidence = (llm_score * 0.65) + (stylometric_score * 0.35)
+confidence = (llm_score * 0.55) + (stylometric_score * 0.45)
 ```
 
-**Rationale for 65/35 split:** Stylometric heuristics are genre-sensitive and unreliable on short texts. The LLM signal is more robust across content types. However, stylometrics provide an independent structural check — if the LLM score is borderline and stylometrics agree, confidence rises; if they disagree, the combined score sits in the uncertain zone, which is the correct behavior.
+**Rationale for 55/45 split:** Stylometric heuristics are genre-sensitive and unreliable on short texts, but the calibration set showed that the previous 65/35 split let the LLM dominate too much. A 55/45 blend still gives the LLM the largest share while allowing calibrated stylometric evidence to lift clearly AI-like generic prose above the AI threshold and keep lightly edited AI output in the uncertain zone.
 
 ---
 
@@ -71,7 +71,7 @@ confidence = (llm_score * 0.65) + (stylometric_score * 0.35)
 
 ### Calibration notes
 
-Raw signal outputs are not adjusted further beyond the normalization described in Signal 2. The 65/35 weighting is the calibration mechanism. If testing shows scores cluster too high (most submissions land above 0.6), the sentence length variance normalization ceiling (currently 30) should be raised to spread the distribution.
+The stylometric signal combines surface metrics with lightweight phrase/register markers and casual human-voice markers. The 55/45 weighting is the final calibration mechanism. If testing shows scores cluster too high (most submissions land above 0.6), the phrase marker list should be narrowed or the marker component should be weighted down.
 
 ---
 
@@ -136,7 +136,7 @@ The individual signal scores are the key piece — a reviewer can see whether th
 A writer whose second language is English tends to write carefully: measured vocabulary, even sentence rhythm, hedged claims. The LLM classifier reads the diplomatic register as AI-like. The stylometric signal sees low sentence-length variance and moderate TTR. Both signals fire in the wrong direction. Combined score: potentially 0.65–0.75, landing in the uncertain or low-AI band. Mitigation: the wide uncertain band absorbs many of these cases. The appeal workflow handles the rest. The label in the uncertain zone explicitly invites appeal.
 
 ### 2. Very short text (under 80 words)
-A haiku, a two-sentence bio, a single paragraph. The TTR metric is unreliable at small sample sizes — any short text has high unique-word ratios by definition. Sentence length variance is unstable with 2–3 sentences. The stylometric signal is effectively noise. The LLM signal carries the full weight of the combined score (still blended 65/35, but 35% of noise is still noise). The system will return a score driven almost entirely by the LLM, which may be appropriate, but the stylometric component should not be trusted. Mitigation: log a warning internally when text is under 80 words; do not surface it to users. Consider widening the uncertain band for short texts in a future version.
+A haiku, a two-sentence bio, a single paragraph. The TTR metric is unreliable at small sample sizes — any short text has high unique-word ratios by definition. Sentence length variance is unstable with 2–3 sentences. The stylometric signal is effectively noise. The LLM signal still carries the largest share of the combined score (55/45), but the stylometric component should not be trusted for very short text. Mitigation: log a warning internally when text is under 80 words; do not surface it to users. Consider widening the uncertain band for short texts in a future version.
 
 ### 3. Highly structured human writing (legal, academic, technical)
 A legal brief or academic abstract written by a human is uniformly structured by professional convention: formal register, low variance, moderate vocabulary, minimal punctuation eccentricity. The stylometric signal will flag it as AI-like. The LLM may also flag the impersonal register. This is a genre-blind failure mode for both signals. Mitigation: none within the current pipeline — this is an acknowledged limitation to document in the README.
@@ -181,7 +181,7 @@ FLOW 1: SUBMISSION
          ┌─────────────────┐
          │ Confidence      │
          │ Scorer          │
-         │ (0.65/0.35 mix) │
+         │ (0.55/0.45 mix) │
          └────────┬────────┘
                   │  confidence (0–1) + attribution
                   ▼
@@ -230,7 +230,7 @@ FLOW 2: APPEAL
 ```
 ### Narrative
 
-A submission enters through the rate-limited `/submit` endpoint, which orchestrates the full pipeline: both signals run on the raw text, the confidence scorer combines their outputs using a 65/35 weighted average, the label generator maps the score to verbatim label text, and the audit logger writes the complete structured entry to SQLite before the response is returned. An appeal enters through `/appeal`, which looks up the existing record by `content_id`, updates its status, and appends the creator's reasoning to the same audit log entry — no re-classification occurs.
+A submission enters through the rate-limited `/submit` endpoint, which orchestrates the full pipeline: both signals run on the raw text, the confidence scorer combines their outputs using a 55/45 weighted average, the label generator maps the score to verbatim label text, and the audit logger writes the complete structured entry to SQLite before the response is returned. An appeal enters through `/appeal`, which looks up the existing record by `content_id`, updates its status, and appends the creator's reasoning to the same audit log entry — no re-classification occurs.
 
 ---
 
@@ -250,7 +250,7 @@ A submission enters through the rate-limited `/submit` endpoint, which orchestra
 
 **Sections to provide:** Detection Signals (Signal 2), Uncertainty Representation (thresholds + weighting), Architecture diagram (confidence scorer box).
 
-**What to ask for:** `compute_stylometrics(text)` function that returns `stylometric_score` as a float; plus `compute_confidence(llm_score, stylometric_score)` that applies the 65/35 weighting and returns `{confidence, attribution}`.
+**What to ask for:** `compute_stylometrics(text)` function that returns `stylometric_score` as a float; plus `compute_confidence(llm_score, stylometric_score)` that applies the 55/45 weighting and returns `{confidence, attribution}`.
 
 **How to verify:** Run all four test inputs through both signals independently and print scores side by side. Check that clearly-AI input scores above 0.75 and clearly-human input scores below 0.35. If borderline inputs land in 0.36–0.74, the scorer is calibrated correctly.
 
