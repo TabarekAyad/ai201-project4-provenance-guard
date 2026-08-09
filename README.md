@@ -108,6 +108,12 @@ The per-day limit of 100 targets sustained high-volume use. Each `/submit` call 
 
 Limiting by IP rather than by `creator_id` is a deliberate choice: `creator_id` is a self-reported string in the request body with no authentication behind it. Anyone could pass `creator_id: "someone_else"` to route around a per-creator limit. IP is the only enforceable identifier without adding a full auth layer, which is out of scope.
 
+**Rate limit verification**
+
+12 rapid requests sent to `POST /submit`. Requests 1–10 return `200 OK`; requests 11–12 return `429 Too Many Requests` once the 10/minute ceiling is hit.
+
+![Rate limit test showing 10 × 200 followed by 2 × 429](rate_limiting_429.png)
+
 ---
 
 ## Detection Signals
