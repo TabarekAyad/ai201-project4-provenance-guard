@@ -147,18 +147,64 @@ def generate_label(confidence: float, attribution: str) -> str:
 
 
 def classify_with_llm(text: str) -> dict:
-    """Return {"ai_score": float 0-1, "reasoning": str} for the given text."""
+    """Return {"ai_score": float 0-1, "reasoning": str} for the given text.
+
+    This wrapper is defensive: if the model response is not valid JSON or the
+    expected keys are missing/invalid, we return a safe default and a clear
+    reasoning string describing the problem.
+    """
     client = _get_client()
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": f"Classify this text:\n\n{text}"},
-        ],
-        temperature=0.0,
-        max_tokens=120,
-    )
-    raw = response.choices[0].message.content.strip()
-    result = json.loads(raw)
-    result["ai_score"] = max(0.0, min(1.0, float(result["ai_score"])))
-    return result
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": f"Classify this text:\n\n{text}"},
+            ],
+            temperature=0.0,
+            max_tokens=120,
+        )
+    except Exception as e:
+        return {"ai_score": 0.5, "reasoning": f"model_request_failed: {e}"}
+
+    try:
+        raw = response.choices[0].message.content.strip()
+    except Exception as e:
+        return {"ai_score": 0.5, "reasoning": f"invalid_model_response_structure: {e}"}
+
+    # Try to parse the raw content as JSON. If that fails, try to extract a
+    # JSON substring (first {...}) then parse that. If parsing still fails,
+    # return a safe default with an explanatory reasoning message.
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            try:
+                result = json.loads(m.group(0))
+            except json.JSONDecodeError as e:
+                return {"ai_score": 0.5, "reasoning": f"json_parse_failed_after_extraction: {e}; raw_preview: {raw[:300]}"}
+        else:
+            return {"ai_score": 0.5, "reasoning": f"json_parse_failed: raw not JSON; raw_preview: {raw[:300]}"}
+
+    # Validate and normalize the parsed result
+    if not isinstance(result, dict):
+        return {"ai_score": 0.5, "reasoning": "parsed_result_not_object"}
+
+    ai_score = result.get("ai_score")
+    reasoning = result.get("reasoning")
+
+    try:
+        ai_score = float(ai_score)
+        ai_score = max(0.0, min(1.0, ai_score))
+    except Exception:
+        ai_score = 0.5
+        if reasoning:
+            reasoning = f"{reasoning} (note: ai_score invalid, defaulted)"
+        else:
+            reasoning = "ai_score missing or invalid; defaulted to 0.5"
+
+    if not reasoning:
+        reasoning = "no_reasoning_provided_by_model"
+
+    return {"ai_score": ai_score, "reasoning": reasoning}
