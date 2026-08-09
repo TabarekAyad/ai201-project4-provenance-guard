@@ -49,7 +49,7 @@ Normalization approach:
 confidence = (llm_score * 0.55) + (stylometric_score * 0.45)
 ```
 
-**Rationale for 55/45 split:** Stylometric heuristics are genre-sensitive and unreliable on short texts, but the calibration set showed that the previous 65/35 split let the LLM dominate too much. A 55/45 blend still gives the LLM the largest share while allowing calibrated stylometric evidence to lift clearly AI-like generic prose above the AI threshold and keep lightly edited AI output in the uncertain zone.
+**Rationale for 55/45 split:** The initial weighting was 65/35 (LLM/stylometric). Calibration testing on four labeled inputs showed that at 65/35 the stylometric signal had negligible influence on borderline cases — the gap between a clearly-AI input and a clearly-human input was only 0.018 stylometric points, effectively noise, and the LLM score alone was deciding the outcome. After rebuilding the stylometric function with AI phrase markers and human-voice markers (in addition to the original three surface metrics), the weight was adjusted to 55/45. The lower LLM share gives the retooled stylometric signal meaningful leverage on borderline calls while keeping the LLM's holistic read as the dominant input. A 55/45 blend still gives the LLM the largest share while allowing calibrated stylometric evidence to lift clearly AI-like generic prose above the AI threshold and keep lightly edited AI output in the uncertain zone.
 
 ---
 
