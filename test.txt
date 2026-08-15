@@ -1,0 +1,65 @@
+Example tests:
+
+Test 1 — AI-generated
+Ground truth: AI-generated
+Expected classification: ai-generated
+
+$t1 = '{"text": "Artificial intelligence has become an increasingly important part of modern society, transforming the way individuals, businesses, and organizations approach everyday tasks. From automating repetitive processes to supporting complex decision-making, AI offers significant opportunities for improving efficiency and productivity. However, its rapid development also raises important ethical considerations, including privacy, bias, transparency, and the potential impact on employment. As these technologies continue to evolve, it is essential that society adopts responsible approaches that maximize their benefits while minimizing potential risks.", "creator_id": "audit-demo-1"}'
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:5000/submit -Method POST -ContentType "application/json" -Body $t1 | Select-Object -ExpandProperty Content
+
+
+Test 2 — Human-generated social-media text
+Ground truth: Human-generated
+Expected classification: human-generated
+
+$t2 = '{"text": "I am going out to deliver some food and get some shopping done before my family returns from a trip sometime tomorrow-Sunday. I’ve been pretty bummed being home alone for the first time in years so I’m using Reddit to keep my mind off of things. What is everyone else up to today?", "creator_id": "audit-demo-1"}'
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:5000/submit -Method POST -ContentType "application/json" -Body $t2 | Select-Object -ExpandProperty Content
+
+
+Test 3 — Human-generated but highly formal
+Ground truth: Human-generated
+Expected classification: uncertain
+
+$t3 = '{"text": "The implementation of effective environmental policies requires careful consideration of both immediate and long-term consequences. Although individual measures may produce measurable improvements, their overall effectiveness depends upon consistent enforcement, appropriate allocation of resources, and continued evaluation. It is therefore necessary for policymakers to adopt approaches that are not only economically feasible but also sufficiently flexible to respond to changing circumstances and emerging evidence.", "creator_id": "audit-demo-1"}'
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:5000/submit -Method POST -ContentType "application/json" -Body $t3 | Select-Object -ExpandProperty Content
+
+
+Test 4 — AI-generated but human-edited
+Ground truth: AI-generated → human-edited
+Expected classification: uncertain
+
+$t4 = '{"text": "I think AI is probably going to change education quite a bit, although it’s difficult to say exactly how. Students can already use these tools to explain difficult topics or help them organize their work, which can be useful. At the same time, there’s a real concern that some students will simply use AI to do the work for them. That doesn’t necessarily mean AI is bad for education, but it does mean schools will have to figure out where the line is. Honestly, I don’t think anyone has completely figured that out yet.", "creator_id": "audit-demo-1"}'
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:5000/submit -Method POST -ContentType "application/json" -Body $t4 | Select-Object -ExpandProperty Content
+
+
+Appeal:
+
+$appeal = '{"content_id": "PASTE-CONTENT-ID-HERE", "creator_reasoning": ""}'
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:5000/appeal -Method POST -ContentType "application/json" -Body $appeal | Select-Object -ExpandProperty Content
+
+View log:
+
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:5000/log | Select-Object -ExpandProperty Content
+
+
+
+Project Input:
+
+# Clearly AI-generated (should score high)
+"Artificial intelligence represents a transformative paradigm shift in modern society. It is important to note that while the benefits of AI are numerous, it is equally essential to consider the ethical implications. Furthermore, stakeholders across various sectors must collaborate to ensure responsible deployment."
+
+# Clearly human-written (should score low)
+"ok so i finally tried that new ramen place downtown and honestly? underwhelming. the broth was fine but they put WAY too much sodium in it and i was thirsty for like three hours after. my friend got the spicy version and said it was better. probably won't go back unless someone drags me there"
+
+# Borderline: formal human writing (may score mid-high on stylometrics)
+"The relationship between monetary policy and asset price inflation has been extensively studied in the literature. Central banks face a fundamental tension between their mandate for price stability and the unintended consequences of prolonged low interest rates on equity and real estate valuations."
+
+# Borderline: lightly edited AI output (should ideally score mid-range)
+"I've been thinking a lot about remote work lately. There are genuine tradeoffs — flexibility and no commute on one side, isolation and blurred work-life boundaries on the other. Studies show productivity varies widely by individual and role type."
+
+$t5 = '{"text": "", "creator_id": "audit-demo-1"}'
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:5000/submit -Method POST -ContentType "application/json" -Body $t5 | Select-Object -ExpandProperty Content
+
+
+$appeal = '{"content_id": "PASTE-CONTENT-ID-HERE", "creator_reasoning": ""}'
+Invoke-WebRequest -UseBasicParsing -Uri http://localhost:5000/appeal -Method POST -ContentType "application/json" -Body $appeal | Select-Object -ExpandProperty Content

@@ -6,6 +6,12 @@ The system is designed for writing platforms that need to surface AI-generated c
 
 ---
 
+## Walkthrough
+
+[Portfolio walkthrough (Loom)](https://www.loom.com/share/eed4f42e4df446f4b2ed2808b44f9e49) — end-to-end demo of the submission pipeline, label variants, appeal workflow, and key design decisions (~2 min).
+
+---
+
 ## Architecture
 
 A submission enters through the rate-limited `POST /submit` endpoint. Both signals run on the raw text in the same request, the confidence scorer combines their outputs, the label generator maps the score to one of three verbatim label strings, and the audit logger writes the complete structured entry to SQLite — all before the response is returned.
